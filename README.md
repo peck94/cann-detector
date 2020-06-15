@@ -11,11 +11,11 @@ To run the code, you will need to make sure all dependencies are properly instal
 
     pip install -r requirements.txt
 
-There are two main scripts provided for running our experiments: `evaluate.py` and `attack.py`. The former will train baseline models and CANNs from scratch and evaluate them against the $L_\infty$ projected gradient descent attack [3].
+There are two main scripts provided for running our experiments: `evaluate.py` and `attack.py`. The former will train baseline models and CANNs from scratch and evaluate them against the $L_\infty$ projected gradient descent attack [3]. The latter script runs our adaptive adversarial attack which specifically attempts to fool the combined detector and classifier simultaneously. Note that you must run the evaluation script before you can run the adaptive attack, since our attack requires certain information (the tuned detection thresholds) provided by `evaluate.py`.
 
 ### The evaluation script
 
-An example command is to run the evaluation is shown below:
+An example command to run the evaluation is shown below:
 
     python evaluate.py mnist ResNet50 --eps .3
 
