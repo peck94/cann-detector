@@ -19,6 +19,8 @@ from tqdm import trange, tqdm
 from pathlib import Path
 from sklearn.model_selection import train_test_split
 
+import sklearn.metrics
+
 
 def compute_scores(f_model, g_model, A, a, B, b, pics, x_data, y_data, batch_size):
     F_data = f_model.predict(x_data, batch_size=batch_size)
@@ -187,8 +189,8 @@ if __name__ == '__main__':
         for alpha in alphas])
     
     # compute scores on clean test set
-    y_pred = baseline_model.predict(x_test, batch_size=args.batch_size)
-    test_scores = compute_scores(f_model, g_model, A, a, B, b, pics, x_test, y_pred, args.batch_size)
+    y_pred_clean = baseline_model.predict(x_test, batch_size=args.batch_size)
+    test_scores = compute_scores(f_model, g_model, A, a, B, b, pics, x_test, y_pred_clean, args.batch_size)
     test_pvalues = np.array([
         (alphas >= np.square(test_score - center_score)).mean()
         for test_score in test_scores])
@@ -198,50 +200,68 @@ if __name__ == '__main__':
         d = json.load(f)
     
     # generate adversarials for baseline
-    clean_rejections, adv_rejections, accs = [], [], []
-    epsilons = np.linspace(args.eps/10, args.eps, 10)
-    for i in range(len(epsilons)):
-        epsilon = epsilons[i]
-        best_tau = float(d['thresholds'][i])
-        threshold = .99 * np.quantile(alphas, 1 - best_tau)
+    best_tau = float(d['threshold'])
+    threshold = .99 * np.quantile(alphas, 1 - best_tau)
 
-        budget = epsilon * (x_train.max() - x_train.min())
-        print(f'Evaluating adaptive adversarials @ {budget} with tau = {best_tau} and r = {threshold}...')
+    budget = args.eps * (x_train.max() - x_train.min())
+    print(f'Evaluating adaptive adversarials @ {budget} with tau = {best_tau} and r = {threshold}...')
 
-        x_advs = generate_adversarials(baseline_model, f_model, g_model, pics, A, a, B, b, center_score, budget, x_test, y_test, args.batch_size, threshold, args.its)
-        adv_acc = baseline_model.evaluate(x_advs, y_test, batch_size=args.batch_size)[1]
-        accs.append(adv_acc)
-        print(f'Adversarial accuracy: {adv_acc}')
+    x_advs = generate_adversarials(baseline_model, f_model, g_model, pics, A, a, B, b, center_score, budget, x_test, y_test, args.batch_size, threshold, args.its)
+    adv_acc = baseline_model.evaluate(x_advs, y_test, batch_size=args.batch_size)[1]
+    print(f'Adversarial accuracy: {adv_acc}')
 
-        # compute scores on adversarial test set
-        y_pred = baseline_model.predict(x_advs, batch_size=args.batch_size)
-        adv_scores = compute_scores(f_model, g_model, A, a, B, b, pics, x_advs, y_pred, args.batch_size)
-        adv_pvalues = np.array([
-            (alphas >= np.square(adv_score - center_score)).mean()
-            for adv_score in adv_scores])
-
-        # compute stats
-        adv_rej = (adv_pvalues <= best_tau).mean()
-        flags = (test_pvalues <= best_tau)
-        clean_rej = flags.mean()
-        if any(flags):
-            clean_rej_acc = baseline_model.evaluate(x_test[flags], y_test[flags])[1]
-        else:
-            clean_rej_acc = np.nan
-
-        print(f'Threshold: {best_tau}')
-        print(f'Clean rejection: {100*round(clean_rej, 4)}%')
-        print(f'\tAccuracy: {100*round(clean_rej_acc, 4)}%')
-        print(f'Adversarial rejection: {100*round(adv_rej, 4)}%')
-        print()
-        clean_rejections.append(clean_rej)
-        adv_rejections.append(adv_rej)
+    # compute scores on adversarial test set
+    y_pred = baseline_model.predict(x_advs, batch_size=args.batch_size)
+    adv_scores = compute_scores(f_model, g_model, A, a, B, b, pics, x_advs, y_pred, args.batch_size)
+    adv_pvalues = np.array([
+        (alphas >= np.square(adv_score - center_score)).mean()
+        for adv_score in adv_scores])
     
-    # plot error curve
-    plt.plot(epsilons, clean_rejections, label='clean rejection', marker='o', color='blue', ls='solid')
-    plt.plot(epsilons, adv_rejections, label='adversarial rejection', marker='x', color='red', ls='dashed')
-    plt.plot(epsilons, accs, label='robust accuracy', marker='*', color='black', ls='dotted')
-    plt.xlabel('relative perturbation budget')
-    plt.ylim((0, 1))
-    plt.legend()
-    plt.savefig(f'{path}/curve_adaptive.pdf')
+    # compute AUROC
+    all_values = np.unique(np.concatenate((pvalues, adv_pvalues)))
+    true_rejections, false_rejections = [], []
+    correct_flags = np.concatenate((
+        y_pred.argmax(axis=1) == y_test.argmax(axis=1),
+        y_pred_clean.argmax(axis=1) == y_test.argmax(axis=1)))
+    for tau in all_values:
+        accept_flags = np.concatenate((
+            adv_pvalues > tau,
+            test_pvalues > tau))
+        
+        true_accepts = np.logical_and(correct_flags, accept_flags).sum()
+        false_accepts = np.logical_and(np.logical_not(correct_flags), accept_flags).sum()
+        false_rejects = np.logical_and(correct_flags, np.logical_not(accept_flags)).sum()
+        true_rejects = np.logical_and(np.logical_not(correct_flags), np.logical_not(accept_flags)).sum()
+
+        trr = true_rejects / (true_rejects + false_accepts)
+        frr = false_rejects / (false_rejects + true_accepts)
+        detection_acc = (true_rejects + true_accepts) / accept_flags.shape[0]
+
+        true_rejections.append(trr)
+        false_rejections.append(frr)
+    sorted_idx = np.argsort(false_rejections)
+    auroc = sklearn.metrics.auc(np.array(false_rejections)[sorted_idx], np.array(true_rejections)[sorted_idx])
+
+    # compute ROC point
+    accept_flags = np.concatenate((
+        adv_pvalues > best_tau,
+        test_pvalues > best_tau))
+    
+    true_accepts = np.logical_and(correct_flags, accept_flags).sum()
+    false_accepts = np.logical_and(np.logical_not(correct_flags), accept_flags).sum()
+    false_rejects = np.logical_and(correct_flags, np.logical_not(accept_flags)).sum()
+    true_rejects = np.logical_and(np.logical_not(correct_flags), np.logical_not(accept_flags)).sum()
+
+    trr = true_rejects / (true_rejects + false_accepts)
+    frr = false_rejects / (false_rejects + true_accepts)
+    detection_acc = (true_rejects + true_accepts) / accept_flags.shape[0]
+
+    # save statistics
+    with open(f'{path}/results_adaptive.json', 'w') as f:
+        json.dump({
+            'adversarial_acc': str(adv_acc),
+            'auroc': str(auroc),
+            'trr': str(trr),
+            'frr': str(frr),
+            'detection_acc': str(detection_acc)
+        }, f)
