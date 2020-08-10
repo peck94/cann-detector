@@ -11,11 +11,11 @@ To run the code, you will need to make sure all dependencies are properly instal
 
     pip install -r requirements.txt
 
-There are two main scripts provided for running our experiments: `evaluate.py` and `attack.py`. The former will train baseline models and CANNs from scratch and evaluate them against the $L_\infty$ projected gradient descent attack [3]. The latter script runs our adaptive adversarial attack which specifically attempts to fool the combined detector and classifier simultaneously. Note that you must run the evaluation script before you can run the adaptive attack, since our attack requires certain information (the tuned detection thresholds) provided by `evaluate.py`.
+There are two main scripts provided for running our experiments: `evaluate.py` and `attack.py`. The former will train baseline models and CANNs from scratch and evaluate them against the $L_\infty$ projected gradient descent attack [3].
 
 ### The evaluation script
 
-An example command to run the evaluation is shown below:
+An example command is to run the evaluation is shown below:
 
     python evaluate.py mnist ResNet50 --eps .3
 
@@ -23,22 +23,27 @@ This will train a ResNet50 and CANN model for the MNIST data set and evaluate it
 
     {
         "baseline_acc": "0.99292517",
+        "adversarial_acc": "0.010884354",
         "center_score": "0.07354409396427587",
-        "thresholds": [
-            "0.07523809523809524",
-            "0.10634920634920635",
-            "0.10793650793650794",
-            "0.10634920634920635",
-            "0.10634920634920635",
-            "0.1061904761904762",
-            "0.10634920634920635",
-            "0.10714285714285714",
-            "0.10714285714285714",
-            "0.1061904761904762"
-        ]
+        "threshold": "0.10857142857142857",
+        "auroc": "0.8353615261869876",
+        "trr": "0.7867385960120186",
+        "frr": "0.10517755489292491",
+        "detection_acc": "0.8409863945578231"
     }
 
-This means the ResNet50 baseline model achieved a clean test accuracy of approximately 99.29%. The `center_score` is the mean deviation value as specified in the paper, which is about 0.074 in this case. The `thresholds` array specifies the non-conformity threshold for each perturbation budget. This JSON file contains important information that is necessary for the adaptive attack to work. The evaluation script will also produce a PDF file `curve_LinfProjectedGradientDescentAttack.pdf` which plots the robust accuracy and rejection rates as a function of the relative perturbation budget.
+This JSON dump has a number of fields:
+
+* `baseline_acc`. The clean accuracy achieved by the baseline model on the test set.
+* `adversarial_acc`. The robust accuracy achieved by the baseline model on adversarial examples generated with the $L_{\inf}$ PGD attack at the specified perturbation budget (30% of the total pixel range in this example).
+* `center_score`. The mean deviation value as defined in the paper.
+* `threshold`. The non-conformity threshold of the detector.
+* `auroc`. The area under the ROC curve achieved by the detector. Note that this value is independent of any tuned threshold.
+* `trr`. The true rejection rate as defined in the paper. Depends on the tuned threshold.
+* `frr`. The false rejection rate as defined in the paper. Depends on the tuned threshold.
+* `detection_acc`. Accuracy of the detector. Depends on the tuned threshold.
+
+This JSON file contains important information that is necessary for the adaptive attack to work, so the evaluation script must be run prior to the adaptive attack.
 
 ### The adaptive attack
 
@@ -46,7 +51,11 @@ When `evaluate.py` has finished, you can run the adaptive adversarial attack scr
 
     python attack.py mnist ResNet50 --eps .3
 
-This will run the adaptive attack againt the pre-trained ResNet50 and CANN models for the MNIST data set up to an $L_\infty$ relative perturbation of 30%. To do this, the attack must reuse the `center_score` and `thresholds` values produced by `evaluate.py`. It will then produce a PDF file `curve_adaptive.pdf` which plots the robust accuracy and rejection rates as a function of the relative perturbation budget.
+This will run the adaptive attack againt the pre-trained ResNet50 and CANN models for the MNIST data set up to an $L_\infty$ relative perturbation of 30%. To do this, the attack must reuse the `center_score` and `threshold` values produced by `evaluate.py`. It will then produce a JSON file `results_adaptive.json` reporting the same statistics as the evaluation script.
+
+### Other evaluations
+
+We have also implemented the Deep KNN [4] and the Mahalanobis distance-based detector [5] for comparison. These can be run using the `deepknn.py` and `mahalanobis.py` scripts respectively using the same interface as the evaluation and adaptive attack scripts. Running them produces JSON files `results_deepknn.json` and `results_mahalanobis.json` with the same metrics as before.
 
 ### Shell scripts
 To reproduce our results exactly, you can also run the enclosed bash shell scripts `mnist.sh`, `fashion.sh`, `cifar10.sh` and `svhn.sh` respectively for the MNIST, Fashion-MNIST, CIFAR-10 and SVHN data sets. The script `all.sh` will run all of these in sequence.
@@ -63,3 +72,6 @@ You can run our experiments against your own models and data sets by supplying a
 1. Shafer, G., & Vovk, V. (2008). A tutorial on conformal prediction. Journal of Machine Learning Research, 9(Mar), 371-421. [PDF](http://www.jmlr.org/papers/volume9/shafer08a/shafer08a.pdf)
 2. Hsu, H., Salamatian, S., & Calmon, F. P. (2019). Correspondence analysis using neural networks. arXiv preprint arXiv:1902.07828. [PDF](https://arxiv.org/pdf/1902.07828)
 3. Madry, A., Makelov, A., Schmidt, L., Tsipras, D., & Vladu, A. (2017). Towards deep learning models resistant to adversarial attacks. arXiv preprint arXiv:1706.06083. [PDF](https://arxiv.org/pdf/1706.06083)
+4. Papernot, N., & McDaniel, P. (2018). Deep k-nearest neighbors: Towards confident, interpretable and robust deep learning. arXiv preprint arXiv:1803.04765. [PDF](https://arxiv.org/pdf/1803.04765)
+5. Lee, K., Lee, K., Lee, H., & Shin, J. (2018). A simple unified framework for detecting out-of-distribution samples and adversarial attacks. In Advances in Neural Information Processing Systems (pp. 7167-7177). [PDF](https://papers.nips.cc/paper/7947-a-simple-unified-framework-for-detecting-out-of-distribution-samples-and-adversarial-attacks.pdf)
+
