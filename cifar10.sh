@@ -5,4 +5,6 @@ for model in "${models[@]}"
 do
     python evaluate.py cifar10 "$model" --eps .03
     python attack.py cifar10 "$model" --eps .03
+    python mahalanobis.py cifar10 "$model" --eps .03
+    python deepknn.py cifar10 "$model" --eps .03
 done
